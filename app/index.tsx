@@ -5,6 +5,8 @@ import MapView, { Marker } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDatabase } from '../contexts/DatabaseContext';
 import { DatabaseStatus } from '../components/DatabaseStatus';
+import { useLocation } from '../contexts/LocationContext';
+import { LocationStatus } from '../components/LocationStatus';
 
 const INITIAL_REGION = {
   latitude: 56.8389,
@@ -26,11 +28,25 @@ export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
 export default function MapScreen() {
   const { markers, addMarker, refresh, isLoading, error } = useDatabase();
   const adding = useRef(false);
+  const { position } = useLocation();
+  const map = useRef<MapView>(null);
+  const centeredOnce = useRef(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [isReady, setIsReady] = useState(false);
   const [isTakingLong, setIsTakingLong] = useState(false);
   const [mapKey, setMapKey] = useState(0);
+
+  function centerOnUser() {
+    if (!position || !isReady) return;
+    map.current?.animateToRegion({ ...position.coords, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+  }
+
+  useEffect(() => {
+    if (!position || !isReady || centeredOnce.current) return;
+    centeredOnce.current = true;
+    map.current?.animateToRegion({ ...position.coords, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+  }, [position, isReady]);
 
   useFocusEffect(useCallback(() => {
     void refresh().catch(() => undefined);
@@ -44,6 +60,7 @@ export default function MapScreen() {
   }, [isReady, mapKey]);
 
   function retryMap() {
+    centeredOnce.current = false;
     setIsReady(false);
     setIsTakingLong(false);
     setMapKey((current) => current + 1);
@@ -52,10 +69,12 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       <MapView
+        ref={map}
         key={mapKey}
         style={StyleSheet.absoluteFill}
         initialRegion={INITIAL_REGION}
         loadingEnabled
+        showsUserLocation={false}
         onMapReady={() => {
           setIsReady(true);
           setIsTakingLong(false);
@@ -69,6 +88,13 @@ export default function MapScreen() {
             .finally(() => { adding.current = false; });
         }}
       >
+        {position && <Marker
+          key="current-position"
+          coordinate={position.coords}
+          title="Вы здесь"
+          pinColor="#2563eb"
+          zIndex={10}
+        />}
         {markers.map((marker) => (
           <Marker
             key={marker.id}
@@ -104,7 +130,10 @@ export default function MapScreen() {
           </View>
         </View>
       )}
-      <View style={styles.databaseStatus}><DatabaseStatus /></View>
+      <View style={styles.databaseStatus}>
+        <DatabaseStatus />
+        <LocationStatus onCenter={centerOnUser} mapReady={isReady} />
+      </View>
     </View>
   );
 }

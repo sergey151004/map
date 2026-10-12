@@ -9,7 +9,8 @@
     "ios": "expo start --go --ios",
     "typecheck": "tsc --noEmit",
     "test:database": "node --test tests/database.test.cjs",
-    "test:storage": "node --test tests/database.test.cjs tests/image-files.test.cjs"
+    "test:storage": "node --test tests/database.test.cjs tests/image-files.test.cjs",
+    "test:location": "node --test tests/location.test.cjs"
   },
   "dependencies": {
     "expo": "~57.0.27",
@@ -17,6 +18,7 @@
     "expo-file-system": "~57.0.7",
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.12",
+    "expo-location": "~57.0.20",
     "expo-router": "~57.0.25",
     "expo-sqlite": "~57.0.4",
     "expo-status-bar": "~57.0.1",
