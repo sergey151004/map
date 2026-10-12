@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Карта и метки",
+    "slug": "map-project",
+    "version": "1.0.0",
+    "scheme": "map-project",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "plugins": [
+      "expo-router",
+      "expo-status-bar"
+    ]
+  }
+}
