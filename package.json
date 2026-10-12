@@ -11,7 +11,8 @@
     "test:database": "node --test tests/database.test.cjs",
     "test:storage": "node --test tests/database.test.cjs tests/image-files.test.cjs",
     "test:location": "node --test tests/location.test.cjs",
-    "test:notifications": "node --test tests/notifications.test.cjs"
+    "test:notifications": "node --test tests/notifications.test.cjs",
+    "test:proximity": "node --test tests/proximity.test.cjs"
   },
   "dependencies": {
     "expo": "~57.0.27",

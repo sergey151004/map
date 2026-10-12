@@ -7,6 +7,7 @@ import { useDatabase } from '../contexts/DatabaseContext';
 import { DatabaseStatus } from '../components/DatabaseStatus';
 import { useLocation } from '../contexts/LocationContext';
 import { LocationStatus } from '../components/LocationStatus';
+import { ProximityStatus } from '../components/ProximityStatus';
 
 const INITIAL_REGION = {
   latitude: 56.8389,
@@ -133,6 +134,7 @@ export default function MapScreen() {
       <View style={styles.databaseStatus}>
         <DatabaseStatus />
         <LocationStatus onCenter={centerOnUser} mapReady={isReady} />
+        <ProximityStatus />
       </View>
     </View>
   );
