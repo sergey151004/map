@@ -7,7 +7,8 @@
     "start": "expo start --go",
     "android": "expo start --go --android",
     "ios": "expo start --go --ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:database": "node --test tests/database.test.cjs"
   },
   "dependencies": {
     "expo": "~57.0.27",
@@ -15,6 +16,7 @@
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.12",
     "expo-router": "~57.0.25",
+    "expo-sqlite": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

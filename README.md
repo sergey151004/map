@@ -5,8 +5,9 @@
 Долгое нажатие на карту создаёт метку, обычное нажатие открывает её ID и координаты.
 Для каждой метки можно выбрать фото из галереи, увидеть миниатюры и удалить отдельное фото.
 Метки и фотографии хранятся в React Context и сохраняются при переходах между экранами.
-После перезапуска приложения они сбрасываются. SQLite, геолокация
-и уведомления будут добавляться на следующих этапах.
+После перезапуска приложения они сбрасываются. Подготовлен отдельный слой SQLite
+из задания 2; его подключение к Context и экранам будет следующим этапом.
+Геолокация и уведомления пока не реализованы.
 
 ## Установка и запуск
 
@@ -84,6 +85,7 @@ iOS-симулятор требует macOS; на Windows используйте
 
 ```powershell
 npm run typecheck
+npm run test:database
 npx expo install --check
 npx expo config --type public
 npx expo-doctor
@@ -115,6 +117,10 @@ Expo Doctor и экспорт Android/iOS. Нативный выбор фото 
 - `contexts/MarkersContext.tsx` — метки и изображения в памяти, последовательные числовые ID.
 - `types.ts` — типы метки, изображения и параметров маршрута.
 - `utils/parseMarkerId.ts` — проверка ID из URL: положительное безопасное целое число.
+- `database/schema.ts` — открытие SQLite, внешние ключи и начальная версия схемы.
+- `database/operations.ts` — параметризованные операции с маркерами и изображениями.
+- `database/errors.ts` — ошибки с исходной причиной и сообщения только в режиме разработки.
+- `tests/database.test.cjs` — проверка SQL и слоя данных через встроенный SQLite Node.js 24.
 - `app.json` — конфигурация Expo и плагина Router.
 - `tsconfig.json` — строгая проверка TypeScript на основе конфигурации Expo.
 - `tasks/` — исходные задания, сохранены без изменений.
@@ -141,7 +147,110 @@ npx expo install react-dom react-native-reanimated react-native-worklets react-n
 npx expo install typescript @types/react --dev
 npx expo install react-native-maps
 npx expo install expo-image-picker
+npx expo install expo-sqlite
 ```
+
+## SQLite: слой данных задания 2
+
+Установлены Expo 57.0.27 и совместимый `expo-sqlite` 57.0.4. Используются
+`openDatabaseAsync`, `execAsync`, `runAsync`, `getFirstAsync`, `getAllAsync`,
+`withTransactionAsync` и встроенный тип `SQLiteDatabase`. ORM и `@types/sqlite3` не нужны.
+
+`await initDatabase()` открывает `markers.db` в постоянной папке SQLite приложения.
+До транзакции на этом соединении включается и проверяется `PRAGMA foreign_keys = ON`.
+При `user_version = 0` создаются две таблицы и устанавливается версия 1 — вместе
+в одной транзакции. Повторное открытие версии 1 сохраняет строки и последовательности ID.
+Более новая/некорректная версия или конфликт таблиц вызывает ошибку без сброса файла.
+
+Схема в `database/schema.ts` точно повторяет задание:
+
+```sql
+CREATE TABLE markers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE marker_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    marker_id INTEGER NOT NULL,
+    uri TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (marker_id) REFERENCES markers (id) ON DELETE CASCADE
+);
+```
+
+Все шесть операций принимают первым аргументом готовое соединение `db`.
+`addMarker(db, latitude, longitude)` возвращает числовой ID; `addImage(db, markerId, uri)`
+и удаления возвращают `void`; чтение возвращает массивы. В результатах чтения
+`marker_id` отображается в `markerId`, `created_at` — в `createdAt`; SQL-столбцы не переименованы.
+`createdAt` имеет тип `string | null`, поскольку схема задания допускает NULL.
+
+Данные передаются через `?`, без подстановки в SQL. Отдельный INSERT/DELETE атомарен
+в SQLite. Удаление маркера и всех его изображений выполняется одним DELETE и встроенным
+каскадом в одной неявной транзакции. Если любая часть не удалась, операция откатывается.
+Добавление фото к отсутствующей метке отклоняется ограничением внешнего ключа.
+Удаление отсутствующего ID безопасно и ничего не меняет.
+
+Ошибки открытия, запросов, ограничений и транзакций отклоняют Promise с понятным
+названием операции и исходной причиной в `error.cause`. Диагностика печатается только
+при `__DEV__`. При неудачной инициализации соединение закрывается; ошибка закрытия
+не подменяет исходную ошибку. Ни очистки базы, ни автоматического повтора записи нет.
+Успешное соединение принадлежит вызывающему коду: в следующем этапе Context должен
+один раз дождаться инициализации, передавать его операциям и вызвать `closeAsync()`
+после завершения всех запросов при освобождении ресурсов. Не запускайте запросы
+параллельно с инициализацией или закрытием соединения.
+
+### Проверка схемы, сохранения и каскада
+
+```powershell
+npm run test:database
+```
+
+Пять тестов запускают исходный код слоя данных с адаптером к реальному SQLite из
+Node.js 24. Они проверяют столбцы/типы/default/внешний ключ, CRUD, строку с кавычками
+как параметр, изоляцию изображений маркеров, ограничения, каскад, сохранение файла
+после закрытия/открытия, откат схемы при сбое и сохранность данных при ошибках.
+Это проверка SQL и логики; нативный мост Expo на телефоне здесь не проверяется.
+
+Для проверки именно Expo SQLite на устройстве временно вызовите из обработчика
+кнопки разработки следующий код. Экраны сейчас сами SQLite не открывают.
+Используйте отдельный `markers-check.db`, чтобы не затрагивать будущую рабочую базу:
+
+```typescript
+import { initDatabase } from './database/schema';
+import { addMarker, addImage, deleteMarker, getMarkerImages } from './database/operations';
+
+async function checkDatabase() {
+  const db = await initDatabase('markers-check.db');
+  try {
+    console.log(await db.getAllAsync('PRAGMA table_info(markers)'));
+    console.log(await db.getAllAsync('PRAGMA table_info(marker_images)'));
+    console.log(await db.getAllAsync('PRAGMA foreign_key_list(marker_images)'));
+    console.log(await db.getFirstAsync('PRAGMA foreign_keys')); // 1
+    console.log(await db.getFirstAsync('PRAGMA user_version')); // 1
+
+    const id = await addMarker(db, 56.8389, 60.6057);
+    await addImage(db, id, 'file:///sqlite-check-1.jpg');
+    await addImage(db, id, 'file:///sqlite-check-2.jpg');
+    console.log((await getMarkerImages(db, id)).length); // 2
+    await deleteMarker(db, id);
+    console.log((await getMarkerImages(db, id)).length); // 0
+    console.log(await db.getAllAsync('PRAGMA foreign_key_check')); // []
+  } finally {
+    await db.closeAsync();
+  }
+}
+```
+
+В `table_info` должны совпасть имена и типы из схемы выше, а в `foreign_key_list`
+должно быть `marker_id → markers.id`, `on_delete: CASCADE`.
+Для ручной проверки сохранения добавьте запись без удаления, закройте соединение,
+перезапустите приложение и прочитайте `getMarkers` после `initDatabase` с тем же именем.
+Тестовые URI нужны только для проверки записей, они не обозначают настоящие фотографии.
+Сохранение самих файлов изображений в постоянную папку этим слоем не выполняется.
+
+Справка API: [Expo SQLite для SDK 57](https://docs.expo.dev/versions/v57.0.0/sdk/sqlite/).
 
 ## Фотографии и разрешения
 
