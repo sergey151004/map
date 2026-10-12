@@ -8,6 +8,7 @@ import { DatabaseStatus } from '../../components/DatabaseStatus';
 import type { MarkerRouteParams } from '../../types';
 import { parseMarkerId } from '../../utils/parseMarkerId';
 import { ImageList } from '../../components/ImageList';
+import { TestNotification } from '../../components/TestNotification';
 
 export default function MarkerScreen() {
   const { id } = useLocalSearchParams<MarkerRouteParams>();
@@ -105,6 +106,7 @@ export default function MarkerScreen() {
             <Text style={styles.description}>ID: {marker.id}</Text>
             <Text style={styles.description}>Широта: {marker.latitude.toFixed(6)}</Text>
             <Text style={styles.description}>Долгота: {marker.longitude.toFixed(6)}</Text>
+            <TestNotification key={marker.id} markerId={marker.id} />
             <Button
               title={isAdding ? 'Выбор фотографии…' : 'Добавить изображение'}
               onPress={pickImage}
