@@ -6,3 +6,19 @@ expo-env.d.ts
 npm-debug.log*
 .npm-cache/
 .DS_Store
+
+# Логи, кеши инструментов и результаты проверок
+*.log
+.cache/
+.eslintcache
+*.tsbuildinfo
+coverage/
+
+# Временные файлы редакторов и ОС
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+Thumbs.db
+Desktop.ini
