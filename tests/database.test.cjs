@@ -67,6 +67,8 @@ function loadLayer(openDatabaseAsync) {
   return {
     ...load(path.resolve(__dirname, '../database/schema.ts')),
     ...load(path.resolve(__dirname, '../database/operations.ts')),
+    ...load(path.resolve(__dirname, '../database/connection.ts')),
+    ...load(path.resolve(__dirname, '../services/createDataTask.ts')),
   };
 }
 
@@ -189,4 +191,68 @@ test('ошибки открытия и запросов сохраняют ис�
   const db = connection();
   await assert.rejects(api.getMarkers(db), (e) => /no such table/.test(e.cause.message));
   await db.closeAsync();
+});
+
+test('одно соединение, последовательные запросы и закрытие после активного запроса', async () => {
+  const opened = [];
+  const api = loadLayer(async () => {
+    assert.ok(opened.every((db) => db.closed));
+    const db = connection();
+    opened.push(db);
+    return db;
+  });
+  const owner = api.createDatabaseConnection();
+  let release;
+  let started;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const began = new Promise((resolve) => { started = resolve; });
+  const first = owner.run(async (db) => {
+    started();
+    await gate;
+    assert.equal(db.closed, false);
+    return api.addMarker(db, 1, 2);
+  });
+  await began;
+  const second = owner.run((db) => api.getMarkers(db));
+  const closing = owner.close();
+  const reopened = owner.run((db) => api.getMarkers(db));
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].closed, false);
+  release();
+  assert.equal(await first, 1);
+  assert.equal((await second).length, 1);
+  await closing;
+  assert.equal((await reopened).length, 0);
+  assert.equal(opened.length, 2);
+  await owner.close();
+  assert.ok(opened.every((db) => db.closed));
+});
+
+test('повтор чтения после успешной записи не создаёт дубликат', async () => {
+  const db = connection();
+  const api = loadLayer(async () => db);
+  await api.initDatabase();
+  let attempts = 0;
+  const task = api.createDataTask(
+    (database) => api.addMarker(database, 10, 20),
+    async () => { if (++attempts === 1) throw new Error('refresh failed'); },
+  );
+  await assert.rejects(task(db), /refresh failed/);
+  assert.equal(await task(db), 1);
+  assert.equal((await api.getMarkers(db)).length, 1);
+  await db.closeAsync();
+});
+
+test('неудачный запрос не ломает очередь, инициализацию можно повторить', async () => {
+  let attempts = 0;
+  const api = loadLayer(async () => {
+    if (++attempts === 1) throw new Error('open failed');
+    return connection();
+  });
+  const owner = api.createDatabaseConnection();
+  await assert.rejects(owner.run(api.getMarkers));
+  const id = await owner.run((db) => api.addMarker(db, 1, 2));
+  await assert.rejects(owner.run((db) => api.addImage(db, id + 1, 'orphan')));
+  assert.equal((await owner.run(api.getMarkers)).length, 1);
+  await owner.close();
 });

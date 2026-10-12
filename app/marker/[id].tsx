@@ -1,16 +1,19 @@
-import { Link, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
+import { Link, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import { Button, ScrollView, StyleSheet, Text } from 'react-native';
+import { Alert, Button, ScrollView, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMarkers } from '../../contexts/MarkersContext';
+import { useDatabase } from '../../contexts/DatabaseContext';
+import { DatabaseStatus } from '../../components/DatabaseStatus';
 import type { MarkerRouteParams } from '../../types';
 import { parseMarkerId } from '../../utils/parseMarkerId';
 import { ImageList } from '../../components/ImageList';
 
 export default function MarkerScreen() {
   const { id } = useLocalSearchParams<MarkerRouteParams>();
-  const { markers, images, addImage, deleteImage } = useMarkers();
+  const { markers, images, addImage, deleteImage, deleteMarker, refresh, isLoading, error } = useDatabase();
+  const router = useRouter();
+  const deleting = useRef(false);
   const [isAdding, setIsAdding] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   // Ref блокирует повторное нажатие сразу, до следующего рендера кнопки.
@@ -19,8 +22,32 @@ export default function MarkerScreen() {
   const marker = markers.find((item) => item.id === markerId);
   const markerImages = images.filter((image) => image.markerId === markerId);
 
+  useFocusEffect(useCallback(() => {
+    void refresh().catch(() => undefined);
+  }, [refresh]));
+
+  // Срабатывает и после успешного повтора удаления/очистки файлов.
+  useEffect(() => {
+    if (deleting.current && !isLoading && !error) {
+      deleting.current = false;
+      if (!marker) router.dismissTo('/');
+    }
+  }, [marker, isLoading, error, router]);
+
+  function confirmDeleteMarker() {
+    if (!marker || isLoading || error || isAdding) return;
+    Alert.alert('Удалить маркер?', 'Маркер и его фотографии будут удалены из приложения.', [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Удалить', style: 'destructive', onPress: () => {
+        if (deleting.current) return;
+        deleting.current = true;
+        void deleteMarker(marker.id).catch(() => undefined);
+      } },
+    ]);
+  }
+
   async function pickImage() {
-    if (!marker || picking.current) return;
+    if (!marker || picking.current || isLoading || error) return;
     picking.current = true;
     setIsAdding(true);
     setPickerError(null);
@@ -41,7 +68,9 @@ export default function MarkerScreen() {
         setPickerError('Не удалось получить фотографию. Попробуйте выбрать другую.');
         return;
       }
-      addImage(marker.id, asset.uri);
+      // Ошибки сохранения показываются отдельно через DatabaseStatus с повтором
+      // сохранения того же файла, без повторного открытия галереи.
+      await addImage(marker.id, asset.uri).catch(() => undefined);
     } catch (error) {
       const code = typeof error === 'object' && error !== null && 'code' in error
         ? String(error.code) : '';
@@ -57,6 +86,7 @@ export default function MarkerScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
+        <DatabaseStatus />
         {markerId === null ? (
           <>
             <Text style={styles.title}>Некорректный ID метки</Text>
@@ -66,7 +96,7 @@ export default function MarkerScreen() {
           <>
             <Text style={styles.title}>Метка не найдена</Text>
             <Text style={styles.description}>
-              Метки №{markerId} нет в памяти. После перезапуска приложения метки сбрасываются.
+              Метки №{markerId} нет в базе данных.
             </Text>
           </>
         ) : (
@@ -78,14 +108,19 @@ export default function MarkerScreen() {
             <Button
               title={isAdding ? 'Выбор фотографии…' : 'Добавить изображение'}
               onPress={pickImage}
-              disabled={isAdding}
+              disabled={isAdding || isLoading || !!error}
             />
-            {pickerError && <Text accessibilityRole="alert" style={styles.error}>{pickerError}</Text>}
+            {pickerError && <>
+              <Text accessibilityRole="alert" style={styles.error}>{pickerError}</Text>
+              <Button title="Повторить выбор" disabled={isAdding || isLoading || !!error} onPress={pickImage} />
+            </>}
             <Text style={styles.heading}>Фотографии ({markerImages.length})</Text>
             <ImageList
               images={markerImages}
-              onDelete={(imageId) => deleteImage(marker.id, imageId)}
+              disabled={isAdding || isLoading || !!error}
+              onDelete={(imageId) => void deleteImage(imageId).catch(() => undefined)}
             />
+            <Button title="Удалить маркер" color="#b91c1c" disabled={isAdding || isLoading || !!error} onPress={confirmDeleteMarker} />
           </>
         )}
         <Link href="/" dismissTo style={styles.link}>

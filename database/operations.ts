@@ -55,3 +55,10 @@ export async function getMarkerImages(db: SQLiteDatabase, markerId: number): Pro
     markerId,
   ));
 }
+
+// Нужны провайдеру для обновления кэша и безопасной очистки файлов без записей в БД.
+export async function getAllImages(db: SQLiteDatabase): Promise<StoredMarkerImage[]> {
+  return databaseOperation('чтение всех изображений', () => db.getAllAsync<StoredMarkerImage>(
+    'SELECT id, marker_id AS markerId, uri, created_at AS createdAt FROM marker_images ORDER BY id',
+  ));
+}

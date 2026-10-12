@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { useRouter, type ErrorBoundaryProps } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter, type ErrorBoundaryProps } from 'expo-router';
 import { ActivityIndicator, Button, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMarkers } from '../contexts/MarkersContext';
+import { useDatabase } from '../contexts/DatabaseContext';
+import { DatabaseStatus } from '../components/DatabaseStatus';
 
 const INITIAL_REGION = {
   latitude: 56.8389,
@@ -23,12 +24,17 @@ export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
 }
 
 export default function MapScreen() {
-  const { markers, addMarker } = useMarkers();
+  const { markers, addMarker, refresh, isLoading, error } = useDatabase();
+  const adding = useRef(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [isReady, setIsReady] = useState(false);
   const [isTakingLong, setIsTakingLong] = useState(false);
   const [mapKey, setMapKey] = useState(0);
+
+  useFocusEffect(useCallback(() => {
+    void refresh().catch(() => undefined);
+  }, [refresh]));
 
   useEffect(() => {
     if (isReady) return;
@@ -55,8 +61,12 @@ export default function MapScreen() {
           setIsTakingLong(false);
         }}
         onLongPress={({ nativeEvent }) => {
+          if (isLoading || error || adding.current) return;
           const { latitude, longitude } = nativeEvent.coordinate;
-          addMarker(latitude, longitude);
+          adding.current = true;
+          void addMarker(latitude, longitude)
+            .catch(() => undefined)
+            .finally(() => { adding.current = false; });
         }}
       >
         {markers.map((marker) => (
@@ -94,12 +104,14 @@ export default function MapScreen() {
           </View>
         </View>
       )}
+      <View style={styles.databaseStatus}><DatabaseStatus /></View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  databaseStatus: { position: 'absolute', top: 0, left: 0, right: 0 },
   hint: {
     position: 'absolute', left: 16, right: 16,
     padding: 12, gap: 4, borderRadius: 8, backgroundColor: '#ffffffee',
