@@ -17,7 +17,8 @@ export function createProximityManager(onError: (message: string | null) => void
   const active = new Map<number, ActiveNotification>();
   const sending = new Set<number>();
   const removing = new Set<string>();
-  const removalQueue = new Set<string>();
+  // До успешного удаления старого уведомления новое для этой метки не отправляем.
+  const removalQueue = new Map<string, number>();
   let disposed = false;
   let hasPosition = false;
 
@@ -26,13 +27,16 @@ export function createProximityManager(onError: (message: string | null) => void
     if (__DEV__) console.warn('[Proximity]', message);
   }
 
-  async function remove(id: string) {
-    removalQueue.add(id);
+  async function remove(id: string, markerId: number) {
+    removalQueue.set(id, markerId);
     if (removing.has(id)) return;
     removing.add(id);
     try {
       const result = await removeNotification(id);
-      if (result.ok) removalQueue.delete(id);
+      if (result.ok) {
+        removalQueue.delete(id);
+        void send(markerId);
+      }
       else report(result.message);
     } catch {
       report('Не удалось убрать уведомление. Повторите попытку.');
@@ -44,6 +48,7 @@ export function createProximityManager(onError: (message: string | null) => void
   async function send(markerId: number) {
     const visit = visits.get(markerId);
     if (disposed || !hasPosition || !visit || active.has(markerId) || sending.has(markerId)) return;
+    if ([...removalQueue.values()].includes(markerId)) return;
     // Блокировка устанавливается до первого await, отдельно для каждой метки.
     sending.add(markerId);
     let succeeded = false;
@@ -55,7 +60,7 @@ export function createProximityManager(onError: (message: string | null) => void
           active.set(markerId, { markerId, notificationId: result.notificationId, timestamp: Date.now() });
         } else {
           // Пока шла отправка, пользователь вышел, метка удалена или провайдер закрыт.
-          await remove(result.notificationId);
+          await remove(result.notificationId, markerId);
         }
       } else report(result.message);
     } catch {
@@ -71,7 +76,7 @@ export function createProximityManager(onError: (message: string | null) => void
   function retry() {
     if (disposed) return;
     onError(null);
-    for (const id of removalQueue) void remove(id);
+    for (const [id, markerId] of removalQueue) void remove(id, markerId);
     for (const id of visits.keys()) void send(id);
   }
 
@@ -95,7 +100,7 @@ export function createProximityManager(onError: (message: string | null) => void
       for (const [id, notification] of active) {
         if (!visits.has(id)) {
           active.delete(id);
-          removalQueue.add(notification.notificationId);
+          removalQueue.set(notification.notificationId, id);
         }
       }
       retry();
@@ -104,9 +109,9 @@ export function createProximityManager(onError: (message: string | null) => void
     dispose() {
       disposed = true;
       visits.clear();
-      for (const notification of active.values()) removalQueue.add(notification.notificationId);
+      for (const notification of active.values()) removalQueue.set(notification.notificationId, notification.markerId);
       active.clear();
-      for (const id of removalQueue) void remove(id);
+      for (const [id, markerId] of removalQueue) void remove(id, markerId);
       // Завершающиеся позже отправки сами удалят свои уведомления.
     },
   };

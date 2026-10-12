@@ -175,3 +175,45 @@ test('dispose removes active and late notifications and ignores future updates',
   f.manager.retry();
   assert.equal(f.sends.length, 2);
 });
+
+test('reentry waits for failed old notification removal; other markers remain independent', async () => {
+  const f = fixture();
+  f.manager.update(origin, [marker()]);
+  f.sends[0].resolve({ ok: true, notificationId: 'old' });
+  await flush();
+  f.failRemoval(true);
+  f.manager.update(far, [marker()]);
+  await flush();
+  f.manager.update(origin, [marker(), marker(2)]);
+  await flush();
+  assert.deepEqual(f.sends.map((send) => send.id), [1, 2]);
+  f.failRemoval(false);
+  f.manager.retry();
+  await flush();
+  assert.deepEqual(f.sends.map((send) => send.id), [1, 2, 1]);
+});
+
+test('a new app session has no remembered notifications and sends again', async () => {
+  const first = fixture();
+  first.manager.update(origin, [marker()]);
+  first.sends[0].resolve({ ok: true, notificationId: 'previous-session' });
+  await flush();
+  // Модель принудительного завершения: dispose не вызывается ОС.
+  const restarted = fixture();
+  restarted.manager.update(origin, [marker()]);
+  assert.equal(restarted.sends.length, 1);
+  assert.equal(restarted.removals.length, 0);
+});
+
+test('GPS oscillation across 100 meters causes new visits, even with poor reported accuracy', async () => {
+  const f = fixture();
+  const atDistance = (meters) => ({ latitude: meters / 6371000 * 180 / Math.PI, longitude: 0, accuracy: 300 });
+  f.manager.update(atDistance(99), [marker()]);
+  f.sends[0].resolve({ ok: true, notificationId: 'near' });
+  await flush();
+  f.manager.update(atDistance(101), [marker()]);
+  await flush();
+  assert.deepEqual(f.removals, ['near']);
+  f.manager.update(atDistance(99), [marker()]);
+  assert.equal(f.sends.length, 2);
+});
