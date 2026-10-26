@@ -3,7 +3,7 @@ import { databaseOperation } from './errors';
 import { relativeImagePath } from '../utils/imagePath';
 
 export const DATABASE_NAME = 'markers.db';
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
 
 const INITIAL_SCHEMA = `
   CREATE TABLE markers (
@@ -60,6 +60,18 @@ export async function initDatabase(name = DATABASE_NAME): Promise<SQLiteDatabase
           }
           // Пути и версия меняются атомарно, до первого чтения/очистки файлов.
           await db.execAsync('PRAGMA user_version = 2;');
+        }
+        if (row.user_version < 3) {
+          await db.execAsync(`
+            CREATE TABLE pending_image_pick (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              token TEXT NOT NULL,
+              marker_id INTEGER NOT NULL,
+              source_uri TEXT,
+              FOREIGN KEY (marker_id) REFERENCES markers (id) ON DELETE CASCADE
+            );
+            PRAGMA user_version = 3;
+          `);
         }
       });
 

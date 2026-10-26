@@ -18,7 +18,7 @@ export function ProximityProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    manager.current?.update(position?.coords ?? null, markers);
+    manager.current?.update(position ? { ...position.coords, timestamp: position.timestamp } : null, markers);
   }, [position, markers]);
 
   return (

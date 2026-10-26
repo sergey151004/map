@@ -117,7 +117,7 @@ export function trackForegroundLocation(onChange: (state: ForegroundLocationStat
         }, 20000);
 
         const started = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 5 },
+          { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 5 },
           (position) => {
             if (!valid(token)) return;
             clearTimeout(firstFixTimer);

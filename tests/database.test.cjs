@@ -77,7 +77,7 @@ test('точная схема, foreign_keys до транзакции, CRUD, п�
   const api = loadLayer(async () => db);
   await api.initDatabase();
   try {
-    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 3);
     for (const [table, names, types] of [
       ['markers', ['id', 'latitude', 'longitude', 'created_at'], ['INTEGER', 'REAL', 'REAL', 'DATETIME']],
       ['marker_images', ['id', 'marker_id', 'uri', 'created_at'], ['INTEGER', 'INTEGER', 'TEXT', 'DATETIME']],
@@ -168,7 +168,7 @@ test('ошибка транзакции откатывает обе таблиц
 });
 
 test('слишком новая версия и конфликт схемы не удаляют существующие данные', async () => {
-  for (const version of [-1, 0, 3]) {
+  for (const version of [-1, 0, 4]) {
     const directory = mkdtempSync(path.join(tmpdir(), 'map-sqlite-'));
     const filename = path.join(directory, 'test.db');
     const db = connection(filename);
@@ -292,7 +292,7 @@ test('новые фотографии хранятся относительно 
   } finally { await db.closeAsync(); }
 });
 
-test('миграция v1 → v2 сохраняет строки, связи и даты; повторное открытие ничего не меняет', async () => {
+test('миграция v1 → v3 сохраняет строки, связи и даты; повторное открытие ничего не меняет', async () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'map-migration-'));
   const filename = path.join(directory, 'test.db');
   const api = loadLayer(async () => connection(filename));
@@ -321,7 +321,7 @@ test('миграция v1 → v2 сохраняет строки, связи и 
       ...row, uri: index < 2 ? `marker-photos/${uris[index].split('/').at(-1)}` : row.uri,
     })));
     assert.deepEqual(await db.getAllAsync('SELECT * FROM markers'), markersBefore);
-    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 3);
     assert.equal((await db.getFirstAsync('PRAGMA foreign_keys')).foreign_keys, 1);
     assert.equal((await db.getAllAsync('PRAGMA foreign_key_check')).length, 0);
     await db.closeAsync();
@@ -359,11 +359,27 @@ test('ошибка миграции откатывает все URI и верс�
     assert.deepEqual(await db.getAllAsync('SELECT * FROM marker_images ORDER BY id'), before);
     const api = loadLayer(async () => db);
     await api.initDatabase();
-    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 3);
     assert.ok((await api.getAllImages(db)).every((row) => row.uri.startsWith('marker-photos/')));
   } finally {
     if (!db.closed) await db.closeAsync();
     unlinkSync(filename);
     rmdirSync(directory);
   }
+});
+
+test('миграция v2 → v3 сохраняет фото и добавляет запрос выбора с каскадом', async () => {
+  const db = connection();
+  const api = loadLayer(async () => db);
+  try {
+    await createVersionOne(db);
+    await db.execAsync('PRAGMA user_version = 2');
+    await db.runAsync('INSERT INTO marker_images (marker_id, uri) VALUES (?, ?)', 7, 'marker-photos/photo-123-abc.jpg');
+    await api.initDatabase();
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 3);
+    assert.equal((await api.getAllImages(db))[0].uri, 'marker-photos/photo-123-abc.jpg');
+    await db.runAsync('INSERT INTO pending_image_pick (id, token, marker_id) VALUES (1, ?, ?)', 'pick', 7);
+    await api.deleteMarker(db, 7);
+    assert.equal((await db.getAllAsync('SELECT * FROM pending_image_pick')).length, 0);
+  } finally { await db.closeAsync(); }
 });

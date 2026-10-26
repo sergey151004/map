@@ -7,6 +7,7 @@ import * as operations from '../database/operations';
 import { removeUnusedImageCopies } from '../services/imageFiles';
 import { saveMarkerImage } from '../services/saveMarkerImage';
 import { createDataTask } from '../services/createDataTask';
+import { createImagePickTask, discardPendingImagePick, ImagePickRecoveryError, recoverPendingImagePick } from '../services/imagePicker';
 
 interface DatabaseContextValue {
   markers: Marker[];
@@ -20,6 +21,7 @@ interface DatabaseContextValue {
   deleteMarker: (id: number) => Promise<void>;
   getMarkers: () => Promise<Marker[]>;
   addImage: (markerId: number, sourceUri: string) => Promise<void>;
+  pickImage: (markerId: number) => Promise<void>;
   deleteImage: (id: number) => Promise<void>;
   getMarkerImages: (markerId: number) => Promise<MarkerImage[]>;
 }
@@ -94,7 +96,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mounted.current = true;
     generation.current += 1;
-    void execute('Открытие базы', async () => undefined).catch(() => undefined);
+    void execute('Открытие базы и восстановление фото', recoverPendingImagePick).catch(() => undefined);
     return () => {
       mounted.current = false;
       // close встаёт после всех принятых запросов; навигация провайдер не размонтирует.
@@ -116,6 +118,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     deleteMarker: (id) => execute('Удаление метки', (db) => operations.deleteMarker(db, id)),
     getMarkers: () => execute('Чтение меток', operations.getMarkers),
     addImage: (markerId, uri) => execute('Сохранение фото', (db) => saveMarkerImage(db, markerId, uri)),
+    pickImage: (markerId) => execute('Выбор и сохранение фото', createImagePickTask(markerId)),
     deleteImage: (id) => execute('Удаление фото', (db) => operations.deleteImage(db, id)),
     getMarkerImages: (id) => execute('Чтение фото', (db) => operations.getMarkerImages(db, id)),
   };
@@ -127,6 +130,11 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
           {isLoading && <ActivityIndicator size="large" />}
           <Text>{error?.message ?? 'Открытие базы данных…'}</Text>
           {error && <Button title="Повторить" disabled={isLoading} onPress={() => void retry().catch(() => undefined)} />}
+          {error?.cause instanceof ImagePickRecoveryError && <Button
+            title="Пропустить восстановление фото"
+            disabled={isLoading}
+            onPress={() => void execute('Отмена восстановления фото', discardPendingImagePick).catch(() => undefined)}
+          />}
         </View>
       )}
     </DatabaseContext.Provider>

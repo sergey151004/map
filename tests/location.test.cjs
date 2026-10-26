@@ -34,7 +34,7 @@ function fixture(initialAppState = 'active') {
     },
   };
   const Location = {
-    Accuracy: { Balanced: 3 },
+    Accuracy: { High: 4 },
     getForegroundPermissionsAsync: async () => control.permission,
     requestForegroundPermissionsAsync: async () => {
       control.requests += 1;
@@ -44,7 +44,7 @@ function fixture(initialAppState = 'active') {
     hasServicesEnabledAsync: async () => control.enabled,
     watchPositionAsync: async (options, callback, errorCallback) => {
       if (control.watchRejects) throw new Error('Native watch failed');
-      assert.equal(options.accuracy, 3);
+      assert.equal(options.accuracy, 4);
       assert.equal(options.timeInterval, 5000);
       assert.equal(options.distanceInterval, 5);
       const watch = {
