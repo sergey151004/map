@@ -77,7 +77,7 @@ test('точная схема, foreign_keys до транзакции, CRUD, п�
   const api = loadLayer(async () => db);
   await api.initDatabase();
   try {
-    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 1);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
     for (const [table, names, types] of [
       ['markers', ['id', 'latitude', 'longitude', 'created_at'], ['INTEGER', 'REAL', 'REAL', 'DATETIME']],
       ['marker_images', ['id', 'marker_id', 'uri', 'created_at'], ['INTEGER', 'INTEGER', 'TEXT', 'DATETIME']],
@@ -168,7 +168,7 @@ test('ошибка транзакции откатывает обе таблиц
 });
 
 test('слишком новая версия и конфликт схемы не удаляют существующие данные', async () => {
-  for (const version of [-1, 0, 2]) {
+  for (const version of [-1, 0, 3]) {
     const directory = mkdtempSync(path.join(tmpdir(), 'map-sqlite-'));
     const filename = path.join(directory, 'test.db');
     const db = connection(filename);
@@ -255,4 +255,115 @@ test('неудачный запрос не ломает очередь, иниц
   await assert.rejects(owner.run((db) => api.addImage(db, id + 1, 'orphan')));
   assert.equal((await owner.run(api.getMarkers)).length, 1);
   await owner.close();
+});
+
+// Снимок схемы версии 1: проверяем обновление уже существующей базы.
+async function createVersionOne(db) {
+  await db.execAsync(`
+    CREATE TABLE markers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE marker_images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      marker_id INTEGER NOT NULL,
+      uri TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (marker_id) REFERENCES markers (id) ON DELETE CASCADE
+    );
+    INSERT INTO markers (id, latitude, longitude) VALUES (7, 56.8, 60.6);
+    PRAGMA user_version = 1;
+  `);
+}
+
+test('новые фотографии хранятся относительно документов, без корня контейнера', async () => {
+  const db = connection();
+  const api = loadLayer(async () => db);
+  await api.initDatabase();
+  try {
+    const id = await api.addMarker(db, 1, 2);
+    await api.addImage(db, id, 'file:///old/Documents/marker-photos/photo-123-abc.jpg');
+    const row = await db.getFirstAsync('SELECT uri FROM marker_images');
+    assert.equal(row.uri, 'marker-photos/photo-123-abc.jpg');
+    assert.equal((await api.getMarkerImages(db, id))[0].uri, row.uri);
+    assert.equal((await api.getAllImages(db))[0].uri, row.uri);
+  } finally { await db.closeAsync(); }
+});
+
+test('миграция v1 → v2 сохраняет строки, связи и даты; повторное открытие ничего не меняет', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'map-migration-'));
+  const filename = path.join(directory, 'test.db');
+  const api = loadLayer(async () => connection(filename));
+  let db = connection(filename);
+  try {
+    await createVersionOne(db);
+    const uris = [
+      'file:///var/mobile/Containers/Data/Application/OLD/Documents/marker-photos/photo-123-abc.jpg',
+      'file:///data/user/0/host.exp.exponent/files/ExperienceData/%40user%2Fapp/marker-photos/photo-124-def',
+      'marker-photos/photo-125-ghi.png',
+      'file:///gallery/original.jpg',
+      'content://media/external/images/123',
+      "file:///gallery/photo's.jpg",
+      'file:///old/Documents/marker-photos/foreign.txt',
+    ];
+    for (const [index, uri] of uris.entries()) {
+      await db.runAsync('INSERT INTO marker_images (marker_id, uri, created_at) VALUES (?, ?, ?)',
+        7, uri, index === 0 ? null : '2026-10-12 12:34:56');
+    }
+    const before = await db.getAllAsync('SELECT * FROM marker_images ORDER BY id');
+    const markersBefore = await db.getAllAsync('SELECT * FROM markers');
+    await db.closeAsync();
+    db = await api.initDatabase();
+    const after = await db.getAllAsync('SELECT * FROM marker_images ORDER BY id');
+    assert.deepEqual(after.map((row) => ({ ...row })), before.map((row, index) => ({
+      ...row, uri: index < 2 ? `marker-photos/${uris[index].split('/').at(-1)}` : row.uri,
+    })));
+    assert.deepEqual(await db.getAllAsync('SELECT * FROM markers'), markersBefore);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
+    assert.equal((await db.getFirstAsync('PRAGMA foreign_keys')).foreign_keys, 1);
+    assert.equal((await db.getAllAsync('PRAGMA foreign_key_check')).length, 0);
+    await db.closeAsync();
+    db = await api.initDatabase();
+    assert.deepEqual(await db.getAllAsync('SELECT * FROM marker_images ORDER BY id'), after);
+    await api.deleteMarker(db, 7);
+    assert.equal((await api.getAllImages(db)).length, 0);
+  } finally {
+    if (!db.closed) await db.closeAsync();
+    unlinkSync(filename);
+    rmdirSync(directory);
+  }
+});
+
+test('ошибка миграции откатывает все URI и версию, повтор завершается успешно', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'map-migration-'));
+  const filename = path.join(directory, 'test.db');
+  let db = connection(filename);
+  try {
+    await createVersionOne(db);
+    for (const uri of [
+      'file:///old/Documents/marker-photos/photo-123-abc.jpg',
+      'file:///old/Documents/marker-photos/photo-124-def.png',
+    ]) {
+      await db.runAsync('INSERT INTO marker_images (marker_id, uri) VALUES (?, ?)', 7, uri);
+    }
+    const before = await db.getAllAsync('SELECT * FROM marker_images ORDER BY id');
+    await db.closeAsync();
+    db = connection(filename, (sql) => sql === 'PRAGMA user_version = 2;');
+    const failingApi = loadLayer(async () => db);
+    await assert.rejects(failingApi.initDatabase(), (error) => /Injected/.test(error.cause.message));
+    assert.equal(db.closed, true);
+    db = connection(filename);
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 1);
+    assert.deepEqual(await db.getAllAsync('SELECT * FROM marker_images ORDER BY id'), before);
+    const api = loadLayer(async () => db);
+    await api.initDatabase();
+    assert.equal((await db.getFirstAsync('PRAGMA user_version')).user_version, 2);
+    assert.ok((await api.getAllImages(db)).every((row) => row.uri.startsWith('marker-photos/')));
+  } finally {
+    if (!db.closed) await db.closeAsync();
+    unlinkSync(filename);
+    rmdirSync(directory);
+  }
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Image, StyleSheet, Text, View } from 'react-native';
 import type { MarkerImage } from '../types';
+import { resolveImageUri } from '../services/imageFiles';
 
 interface ImageListProps {
   images: MarkerImage[];
@@ -20,7 +21,7 @@ function ImageItem({ image, onDelete, disabled }: { image: MarkerImage; onDelete
         </View>
       ) : (
         <Image
-          source={{ uri: image.uri }}
+          source={{ uri: resolveImageUri(image.uri) }}
           style={styles.preview}
           resizeMode="cover"
           accessibilityLabel={`Фото №${image.id}`}

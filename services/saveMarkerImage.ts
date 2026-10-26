@@ -3,7 +3,7 @@ import { addImage } from '../database/operations';
 import { copyImageToDocuments, removeImageCopy } from './imageFiles';
 
 export async function saveMarkerImage(db: SQLiteDatabase, markerId: number, sourceUri: string) {
-  const uri = copyImageToDocuments(sourceUri);
+  const uri = await copyImageToDocuments(sourceUri);
   try {
     await addImage(db, markerId, uri);
   } catch (cause) {

@@ -1,8 +1,9 @@
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import { databaseOperation } from './errors';
+import { relativeImagePath } from '../utils/imagePath';
 
 export const DATABASE_NAME = 'markers.db';
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 
 const INITIAL_SCHEMA = `
   CREATE TABLE markers (
@@ -47,6 +48,18 @@ export async function initDatabase(name = DATABASE_NAME): Promise<SQLiteDatabase
           await db.execAsync(INITIAL_SCHEMA);
           // PRAGMA не поддерживает bind-параметры. Здесь только постоянное число.
           await db.execAsync('PRAGMA user_version = 1;');
+        }
+
+        if (row.user_version < 2) {
+          const images = await db.getAllAsync<{ id: number; uri: string }>('SELECT id, uri FROM marker_images');
+          for (const image of images) {
+            const relativePath = relativeImagePath(image.uri);
+            if (relativePath && relativePath !== image.uri) {
+              await db.runAsync('UPDATE marker_images SET uri = ? WHERE id = ?', relativePath, image.id);
+            }
+          }
+          // Пути и версия меняются атомарно, до первого чтения/очистки файлов.
+          await db.execAsync('PRAGMA user_version = 2;');
         }
       });
 

@@ -7,6 +7,7 @@ export interface Marker {
 export interface MarkerImage {
   id: number;
   markerId: number;
+  // Для копий приложения — путь marker-photos/... относительно Paths.document.
   uri: string;
 }
 

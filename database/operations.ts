@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import type { Marker, MarkerImage } from '../types';
 import { databaseOperation } from './errors';
+import { relativeImagePath } from '../utils/imagePath';
 
 // created_at по схеме допускает NULL. В приложении используем camelCase,
 // имена столбцов в самой базе остаются точно такими, как в задании.
@@ -39,7 +40,8 @@ export async function getMarkers(db: SQLiteDatabase): Promise<StoredMarker[]> {
 
 export async function addImage(db: SQLiteDatabase, markerId: number, uri: string): Promise<void> {
   return databaseOperation('добавление изображения', async () => {
-    await db.runAsync('INSERT INTO marker_images (marker_id, uri) VALUES (?, ?)', markerId, uri);
+    // В БД не сохраняем корень контейнера: на iOS он может измениться.
+    await db.runAsync('INSERT INTO marker_images (marker_id, uri) VALUES (?, ?)', markerId, relativeImagePath(uri) ?? uri);
   });
 }
 
